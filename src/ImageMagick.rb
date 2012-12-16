@@ -14,7 +14,6 @@ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 Name:         ImageMagick.rb
 Author:       Andreas Eisenbarth
 Description:  Class to control ImageMagick
-              required by TextureResizer
 Usage:        Create an instance:
                 imagemagick = ImageMagick.new
               load a material:
@@ -46,14 +45,6 @@ require 'sketchup.rb'
 
 
 
-module AE
-
-
-
-class TextureResizer
-
-
-
 class ImageMagick
 @@caches = {}
 @@app_observer = false
@@ -78,7 +69,7 @@ def self.installed?
   if WIN || WINE && !@@unix_native
     @@im_win = Sketchup.read_default("ImageMagick", "location", @@im_win) if !File.exists?(@@im_win)
     if !File.exists?(@@im_win)
-      UI.messagebox("Make Unique Texture HQ requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert.exe' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
+      UI.messagebox("This Plugin requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert.exe' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
       path = UI.openpanel("Please select the file path of convert.exe", @@im_win, "convert.exe")
       Sketchup.write_default("ImageMagick", "location", path)
       return false if !File.exists?(path.to_s)
@@ -556,14 +547,6 @@ end # def file_observer
 
 
 end # class ImageMagick
-
-
-
-end # class TextureResizer
-
-
-
-end # module AE
 
 
 
