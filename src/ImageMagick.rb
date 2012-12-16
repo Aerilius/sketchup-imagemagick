@@ -200,7 +200,7 @@ end
 # @param[Boolean] lossless  whether to export a copy of jpeg/jpg images in bmp format
 # @return [String] the file path in the system's format (not ruby format)
 #
-def load(material, lossless=true)
+def load(material, lossless=false)
   return (puts(material.name+": is untextured"); nil) if material.materialType < 1 # refuse untextured materials
   return get_path(material) if loaded?(material)
   Dir.mkdir(@cache_dir) if !File.exists?(@cache_dir)
