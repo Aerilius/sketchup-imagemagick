@@ -38,8 +38,8 @@ Requirements: ImageMagick
                   if not install it from the repositories
                   or install the Windows version of ImageMagick into Wine as described above.
                 OS X: ImageMagick can be installed with HomeBrew or MacPorts
-Version:      1.4.0
-Date:         08.10.2012
+Version:      1.4.3
+Date:         23.11.2012
 
 =end
 require 'sketchup.rb'
@@ -60,8 +60,8 @@ class ImageMagick
 # get temporary folder that is writable
 temp = [ENV['TMPDIR'], ENV['TMP'], ENV['TEMP'], ENV['USERPROFILE'], '/tmp', '.'].inject(nil){ |t,dir| (!t && dir && File.directory?(dir) && File.writable?(dir))? dir : t }
 @@temp = File.join( File.expand_path(temp), "skp_"+Module.nesting[1].name[/[^\:]+$/].downcase)
-OSX = ( Object::RUBY_PLATFORM =~ /(darwin)/i ? true : false ) unless defined?(Module.nesting[0]::OSX)
-WINE = ( ((!ENV["WINEPREFIX"].nil? || !ENV["WINELOADER"].nil? || File.exists?("Z:/usr/bin/wine")) && !OSX)? true : false ) unless defined?(Module.nesting[0]::WINE)
+OSX = ( Object::RUBY_PLATFORM =~ /(darwin)/i ) unless defined?(Module.nesting[0]::OSX)
+WINE = ( File.exists?("C:/Windows/system32/winepath.exe" || File.exists?("Z:/usr/bin/wine")) && !OSX) unless defined?(Module.nesting[0]::WINE)
 WIN = ( !OSX && !WINE ) unless defined?(Module.nesting[0]::WIN)
 # whether to use native unix ImageMagick or ImageMagick through Wine
 @@unix_native = WINE && File.exists?("Z:/bin/bash") && File.exists?("Z:/usr/bin/convert")
@@ -476,7 +476,7 @@ def run_shell_command(cmd, &block)
         f.puts %[touch "`wine winepath.exe -u '#{@cache_dir}'`/finished.txt";]
       }
       begin
-        system(%[Z:\\bin\\bash "#{ENV["WINEPREFIX"]}/dosdevices/#{fsh.sub(/^(\w)(?=\:)/,@cache_dir[0,1].downcase)}"])
+        system(%[Z:\\bin\\bash -c "bash `wine winepath.exe -u "#{fsh}"`"])
       rescue
       end
     # otherwise use Windows ImageMagick as distributed with this plugin
