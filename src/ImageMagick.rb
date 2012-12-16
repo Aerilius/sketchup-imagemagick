@@ -100,9 +100,10 @@ def self.texture_resolution(face, front=true, c=nil)
   @@tw ||= Sketchup.create_texture_writer
   # Get points of a square (with side length 0.01) in object space.
   c = face.bounds.center if c.nil?
-  vec0 = c.vector_to(face.vertices[1].position).normalize
+  vec0 = face.normal.axes.x
   vec0.length = 0.005
-  vec1 = vec0 * face.normal
+  vec1 = face.normal.axes.y
+  vec1.length = 0.005
   ps = [c+vec0+vec1, c+vec0-vec1, c-vec0-vec1, c-vec0+vec1]
   # Get the corresponding UVs.
   uv_help = face.get_UVHelper(true, true, @@tw)
