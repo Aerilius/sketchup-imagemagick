@@ -11,7 +11,7 @@ Load a material:
 Edit the material:
   * `imagemagick.edit(material, convert_command, queue=false){ do_after_import() }`
   * reimports the material's image
-  * optional: queue = true/false queues the image for batch conversion instead of editing it imediately  
+  * optional: queue = true/false queues the image for batch conversion instead of editing it immediately
     call `imagemagick.execute` to start the batch conversion
   
 Create a new material either based on an existing one:
