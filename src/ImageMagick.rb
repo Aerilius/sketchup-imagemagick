@@ -208,7 +208,7 @@ end
 # @return [String] the file path in the system's format (not ruby format)
 #
 def load(material, lossless=true)
-  return if material.materialType < 1 # refuse untextured materials
+  return (puts(material.name+": is untextured"); nil) if material.materialType < 1 # refuse untextured materials
   return get_path(material) if loaded?(material)
   Dir.mkdir(@cache_dir) if !File.exists?(@cache_dir)
   filename = File.basename(material.texture.filename)
@@ -217,7 +217,7 @@ def load(material, lossless=true)
   # create temporary group to export texture image without uv-mapping
   tmp_group = @model.entities.add_group
   tmp_group.material = material
-  @tw.load(tmp_group)
+  @tw.load(tmp_group) rescue (puts(material.name+": could not load material into TextureWriter"); return nil)
   success = @tw.write(tmp_group, path, true)
   return (puts(material.name+": could not write file "+path); nil) if success!=0
   @cache[material] = {:path => path}
