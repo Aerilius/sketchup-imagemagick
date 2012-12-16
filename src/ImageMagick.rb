@@ -163,6 +163,7 @@ def initialize
   @cmd_blocks = []
   Dir.mkdir(@cache_dir) if !File.exists?(@cache_dir)
   @@caches[@model] = self
+  @active = true
   @model.add_observer(ModelObserver.new)
   @@app_observer = Sketchup.add_observer(QuitObserver.new) if !@@app_observer
 end # def
@@ -329,6 +330,7 @@ end
 # @param [Proc] block  code block to execute after all images have been converted
 #
 def execute(&block)
+  @active = true # An action is running now.
   cmd_blocks = @cmd_blocks # save array temporarily for block because instance variable will be cleared immediately
   bigblock = Proc.new{
     cmd_blocks.each{|p| p.call}
@@ -399,6 +401,15 @@ def erase
   purge
   Dir.delete(@cache_dir) if File.exists?(@cache_dir) unless @@debug
   @@caches.delete(self)
+end
+
+
+
+# Cancel all running actions.
+#
+def cancel
+  @active = false
+  purge
 end
 
 
@@ -534,7 +545,7 @@ end # def run_shell_command
 # @param [Proc] block code block to execute when file is created
 #
 def file_observer(file, &block)
-  if !File.exists?(file)
+  if !File.exists?(file) && @active
     UI.start_timer(0.2){ file_observer(file, &block) }
   else
     File.delete(file) rescue nil unless @@debug
