@@ -1,6 +1,6 @@
 =begin
 
-Copyright 2011, Andreas Eisenbarth
+Copyright 2011-2013, Andreas Eisenbarth
 All Rights Reserved
 
 Permission to use, copy, modify, and distribute this software for
@@ -29,16 +29,21 @@ Usage:        Create an instance:
                or creating it purely with the convert command, giving a material name
                 imagemagick.create(materialname, convert_command, queue){|new_material| do_after_import() }
 Requirements: ImageMagick
-                Windows: download it from this plugin's site or from the official site
+                Windows:
+                  Download it from this plugin's site or from the official site
                   http://www.imagemagick.org/script/binary-releases.php#windows
                   Place it either in the Plugins folder or at the location of your choice.
                   The Plugin will then ask you once for the install location.
-                Linux (Wine): Your distribution most likely comes with native ImageMagick preinstalled,
-                  if not install it from the repositories
-                  or install the Windows version of ImageMagick into Wine as described above.
+                Linux (Wine):
+                  You can use either native ImageMagick (much faster)
+                  (your distribution probably comes with "imagemagick" preinstalled,
+                  if not install it from the repositories. The script also assumes
+                  Wine has the "/" directory linked to a Windows "Z:" drive.)
+                  or install the Windows version of ImageMagick into Wine exactly
+                  as described above for Windows.
                 OS X: ImageMagick can be installed with HomeBrew or MacPorts
-Version:      1.4.3
-Date:         23.11.2012
+Version:      1.4.
+Date:         16.04.2013
 
 =end
 require 'sketchup.rb'
@@ -48,20 +53,23 @@ require 'sketchup.rb'
 class ImageMagick
 @@caches = {}
 @@app_observer = false
-# get temporary folder that is writable
+# Platform detection.
+OSX = ( Object::RUBY_PLATFORM =~ /(darwin)/i ) unless defined?(self::OSX)
+WINE = ( File.exists?("C:/Windows/system32/winepath.exe" || File.exists?("Z:/usr/bin/wine")) && !OSX) unless defined?(self::WINE)
+WIN = ( !OSX && !WINE ) unless defined?(self::WIN)
+# Whether to use native unix ImageMagick or ImageMagick through Wine.
+@@unix_native = WINE && File.exists?("Z:/bin/sh") && File.exists?("Z:/usr/bin/convert")
+# Location of ImageMagick on Windows.
+@@im_win = $LOAD_PATH.find{|p| f = File.join(p, "ImageMagick", "convert.exe"); break f if File.exists?(f)}
+# Get a temporary folder that is writable.
 temp = [ENV['TMPDIR'], ENV['TMP'], ENV['TEMP'], ENV['USERPROFILE'], '/tmp', '.'].inject(nil){ |t,dir| (!t && dir && File.directory?(dir) && File.writable?(dir))? dir : t }
+temp = "Z:/tmp" if WINE && @@unix_native
 @@temp = File.join( File.expand_path(temp), "skp_"+Module.nesting[1].name[/[^\:]+$/].downcase)
-OSX = ( Object::RUBY_PLATFORM =~ /(darwin)/i ) unless defined?(Module.nesting[0]::OSX)
-WINE = ( File.exists?("C:/Windows/system32/winepath.exe" || File.exists?("Z:/usr/bin/wine")) && !OSX) unless defined?(Module.nesting[0]::WINE)
-WIN = ( !OSX && !WINE ) unless defined?(Module.nesting[0]::WIN)
-# whether to use native unix ImageMagick or ImageMagick through Wine
-@@unix_native = WINE && File.exists?("Z:/bin/bash") && File.exists?("Z:/usr/bin/convert")
-# location of portable ImageMagick
-@@im_win = File.expand_path(File.join(Sketchup.find_support_file("Plugins"),"ImageMagick/convert.exe"))
-@@debug = false
+@@debug = false unless defined?(@@debug)
+@@async = true unless defined?(@@async)
 
 
-# Check if ImageMagick is installed, otherwise offer to select an alternative install location.
+# Check if ImageMagick is installed on a Windows-based system, otherwise offer to select an alternative install location.
 # @return [Boolean] whether ImageMagick is installed on Windows/Wine system.
 #
 def self.installed?
@@ -71,8 +79,8 @@ def self.installed?
     if !File.exists?(@@im_win)
       UI.messagebox("This Plugin requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert.exe' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
       path = UI.openpanel("Please select the file path of convert.exe", @@im_win, "convert.exe")
-      Sketchup.write_default("ImageMagick", "location", path)
       return false if !File.exists?(path.to_s)
+      Sketchup.write_default("ImageMagick", "location", path)
     end
   end
   return true
@@ -80,7 +88,7 @@ end # def imagemagick_installed?
 
 
 
-# Get the texture resolution of a face. # TODO: improve this method. Make it faster and more logical.
+# Get the texture resolution of a face.
 # @param [Sketchup::Face] face
 # @param [Boolean] front  side of the face (frontface=true, backface=false)
 # @param [Geom::Point3d] c  point at which the resolution should be determined
@@ -120,14 +128,14 @@ end # def texture_resolution
 # @return [String] a complete file path
 #
 def self.to_filename(dir, string, ext=nil)
-  # separate extension from basename
+  # Separate extension from basename.
   ext = File.extname(string) if ext.nil?
   string = File.basename(string, ext.to_s)
-  # clean up basename
+  # Clean up basename.
   string = string[/.{1,30}/].gsub(/\n|\r/,"").gsub(/[^0-9a-zA-Z\-\_\.\(\)\#]+/,"_").gsub(/^_+|_+$/,"").to_s
   string = "file" if string.empty?
   base = File.join(dir, string)
-  # detect collision of filenames and return alternative filename (numbered)
+  # Detect collision of filenames and return alternative filename (numbered).
   base_orig = base
   i = 0
   while File.exists?(base + ext)
@@ -148,16 +156,60 @@ end
 def initialize
   @model = Sketchup.active_model
   @tw = Sketchup.create_texture_writer
-  @cache_dir = @@temp + Time.now.to_i.to_s[/.{5}$/]
+  @cache_dir = get_cache_dir
+  Dir.mkdir(@cache_dir) unless File.exists?(@cache_dir)
   @cache = {}
   @cmds = []
   @cmd_blocks = []
-  Dir.mkdir(@cache_dir) if !File.exists?(@cache_dir)
+  # Have one instance of ImageMagick for each model in a multi-document interface.
   @@caches[@model] = self
-  @active = true
+  @active = true  # TODO: Rename this into something like @simulate or @noob ?
   @model.add_observer(ModelObserver.new)
   @@app_observer = Sketchup.add_observer(QuitObserver.new) if !@@app_observer
 end # def
+
+
+
+# Toogle between asynchronous and synchronous behavior.
+# Asynchronous: After executing the command, Ruby continues with the next line of
+# code and SketchUp stays responsive for tool actions.
+# Synchronous: no action or camera movement possible until image editing is finished (This is mostly useful for testing purposes).
+#
+def self.async
+  @@async
+end
+def self.async=(boolean)
+  @@async = boolean
+end
+def self.async!
+  @@async = true
+end
+def self.sync
+  !@@async
+end
+def self.sync=(boolean)
+  @@async = !boolean
+  return boolean
+end
+def self.sync!
+  @@async = false
+  return true
+end
+class << self
+  alias_method(:asynchronous, :async)
+  alias_method(:asynchronous=, :async=)
+  alias_method(:asynchronous!, :async!)
+  alias_method(:synchronous, :sync)
+  alias_method(:synchronous=, :sync=)
+  alias_method(:synchronous!, :sync!)
+end
+
+
+# Generate a unique file path for a new cache directory.
+def get_cache_dir
+  @@temp + Time.now.to_i.to_s[/.{5}$/]
+end # def get_cache_dir
+private :get_cache_dir
 
 
 
@@ -184,8 +236,9 @@ end
 #
 def get_path(material)
   path = @cache[material][:path]
-  if WINE && @@unix_native == true
-    return %["`wine winepath.exe -u '#{path}'`"]
+  if WINE && @@unix_native # TODO: This function is probably not used.
+    # Not sure if this should return the Wine=Windows format or Unix format.
+    return path[/^Z\:/] ? %["#{path.sub(/Z\:/,"")}"] : %["`wine winepath.exe -u '#{path}'`"]
   elsif WIN || WINE
     return %["#{path.gsub(/\//,'//').gsub(/\//,'\\')}"]
   elsif OSX
@@ -203,18 +256,19 @@ end
 def load(material, lossless=false)
   return (puts(material.name+": is untextured"); nil) if material.materialType < 1 # refuse untextured materials
   return get_path(material) if loaded?(material)
-  Dir.mkdir(@cache_dir) if !File.exists?(@cache_dir)
   filename = File.basename(material.texture.filename)
-  ext = (!File.extname(filename))? ".png" : nil # force extension if filename has no extension
+  # Force extension if filename has no extension.
+  ext = (File.extname(filename).empty?)? ".png" : nil
   path = to_filename(@cache_dir, filename, ext)
-  # create temporary group to export texture image without uv-mapping
+  Dir.mkdir(@cache_dir) if !File.exists?(@cache_dir)
+  # Create temporary group to export texture image without UV-mapping.
   tmp_group = @model.entities.add_group
   tmp_group.material = material
   @tw.load(tmp_group) rescue (puts(material.name+": could not load material into TextureWriter"); return nil)
   success = @tw.write(tmp_group, path, true)
   return (puts(material.name+": could not write file "+path); nil) if success!=0
   @cache[material] = {:path => path}
-  # export a lossless copy for lossy formats (to preserve quality and for speed)
+  # Export a lossless copy for lossy formats (to preserve quality and for speed).
   if lossless && (filename[/\.jpg$/] || filename[/\.jpeg$/i])
     orig = path
     path = to_filename(@cache_dir, filename.sub(/\..{1,4}$/, ".bmp") )
@@ -242,15 +296,15 @@ end
 def edit(material, convert_option, queue=false, &block)
   load(material) if !loaded?(material)
   path = @cache[material][:path]
-  convert(path, convert_option, path, queue){
+  convert(path, convert_option, path, queue){|result|
     reimport(material)
-    block.call if block_given?
+    block.call(result) if block_given?
   }
 end
 
 
 
-# Create a new material and import it
+# Create a new material and import it.
 # Special convert command where input file is output file.
 # @param [Sketchup::Material, String] material  either a Sketchup::Material to clone or a string of the new material's name
 # @param [String] convert_option  ImageMagick convert command (between input and output)
@@ -259,21 +313,23 @@ end
 # @return [Sketchup::Material] the new material
 #
 def create(material, convert_option, queue=false, &block)
+  # Clone the given material and export its texture for conversion.
   if material.class == Sketchup::Material
     load(material) if !loaded?(material)
     path = @cache[material][:path]
     new_material = clone(material)
     new_name = new_material.display_name
+  # Or create an empty material and let ImageMagick generate a texture image.
   elsif material.class == String || material.class == nil
     new_name = material.to_s
     (i = 0; i += 1 while @model.materials[new_name+i.to_s]; new_name = new_name+i.to_s) if @model.materials[new_name]
     new_material = @model.materials.add(new_name)
-    path = ""
+    path = "" # In this case, the convert command needs to create a new image.
   end
   new_path = to_filename(@cache_dir, new_name)
-  @cache[new_material] = {:path => path}
-  # convert
-  convert(path, convert_option, new_path, queue){
+  @cache[new_material] = {:path => new_path}
+  # Convert.
+  convert(path, convert_option, new_path, queue){|result|
     reimport(new_material, new_path)
     block.call(new_material) if block_given?
   }
@@ -291,26 +347,28 @@ end
 # @param [Proc] block  code block to execute after this image has been converted
 #
 def convert(input, convert_option, output=input, queue=false, &block)
-  if WINE && @@unix_native == true
+  if WINE && @@unix_native
     executable = 'convert'
-    input = %["`wine winepath.exe -u '#{input}'`"] if !input.to_s.nil?
-    output = %["`wine winepath.exe -u '#{output}'`"] if !input.to_s.nil?
+    input = input[/^Z\:/] ? %["#{input.sub(/Z\:/,"")}"] : %["`wine winepath.exe -u '#{input}'`"]
+    output = output[/^Z\:/] ? %["#{output.sub(/Z\:/,"")}"] : %["`wine winepath.exe -u '#{output}'`"]
   elsif WIN || WINE
     executable = %["#{@@im_win.gsub(/\//,'//').gsub(/\//,'\\')}"]
-    input = %["#{input.gsub(/\//,'//').gsub(/\//,'\\')}"] if !input.to_s.nil?
-    output = %["#{output.gsub(/\//,'//').gsub(/\//,'\\')}"] if !input.to_s.nil?
+    input = %["#{input.gsub(/\//,'//').gsub(/\//,'\\')}"]
+    output = %["#{output.gsub(/\//,'//').gsub(/\//,'\\')}"]
   elsif OSX
     executable = 'convert'
-    input = %["#{input}"] if !input.to_s.nil?
-    output = %["#{output}"] if !input.to_s.nil?
+    input = %["#{input}"]
+    output = %["#{output}"]
   end
+  # Compose the command.
   cmd = executable + ' ' + input.to_s + ' ' + convert_option + ' ' + output.to_s
   if queue
+    # Execute it later.
     @cmd_blocks << block if block_given?
     @cmds << cmd
     return
   else
-  # execute single shell command (if it is not queued up)
+    # Execute single shell command now (if it is not queued up).
     run_shell_command(cmd, &block)
   end
 end
@@ -321,15 +379,15 @@ end
 # @param [Proc] block  code block to execute after all images have been converted
 #
 def execute(&block)
-  @active = true # An action is running now.
-  cmd_blocks = @cmd_blocks # save array temporarily for block because instance variable will be cleared immediately
-  bigblock = Proc.new{
-    cmd_blocks.each{|p| p.call}
-    block.call if block_given?
-#    @cmds = [] # TODO better use this? Problem: what if new command is added while this is not finished?
-#    @cmd_block = []
+  # An action is running now.
+  @active = true
+  # Save array temporarily for block because instance variable will be cleared immediately.
+  cmd_blocks = @cmd_blocks
+  bigblock = Proc.new{|result|
+    cmd_blocks.each{|p| p.call(result)}
+    block.call(result) if block_given?
   }
-  # batch execute shell commands
+  # Batch execute shell commands.
   run_shell_command(@cmds, &bigblock)
   @cmds = []
   @cmd_blocks = []
@@ -344,17 +402,17 @@ end
 #
 def reimport(material, path=nil)
   path = @cache[material][:path] if path.nil? && loaded?(material)
-  return (puts("file "+path+" not found")) if !File.exists?(path)
+  return (puts("file "+path+" not found")) if path.nil? || !File.exists?(path)
   rw = material.texture.width # real-world width
   rh = material.texture.height # real-world height
   a = material.alpha
   c = material.color
-  # re-import texture
+  # Re-import texture.
   material.texture = path
-  # fix texture size (SketchUp changes it sometimes after replacing the image file!)
+  # Fix the texture size. (SketchUp changes it sometimes after replacing the image file!)
   material.texture.size = [rw,rh]
   material.alpha = a
-  #material.color = c FIXME: API bug, this sets always "colorized"
+  # material.color = c # FIXME: API bug, this sets always "colorized".
 end # def reimport
 
 
@@ -365,7 +423,7 @@ end # def reimport
 def apply
   @cache.each{|material, hash|
     if hash[:orig]
-      convert(hash[:path], "", hash[:orig]){
+      convert(hash[:path], "", hash[:orig]){|result|
         reimport(material, hash{:orig})
       }
     end
@@ -378,8 +436,9 @@ end
 #
 def purge
   Dir.foreach(@cache_dir){|f|
-    next if f=='.' or f=='..'
-    File.delete(File.join(@cache_dir, f)) unless @@debug
+    file = File.join(@cache_dir, f)
+    next unless File.file?(file)
+    File.delete(file) rescue nil unless @@debug
   } if File.exists?(@cache_dir) && Dir.entries(@cache_dir)[2]
   @cache = {}
 end
@@ -415,12 +474,12 @@ class ModelObserver < Sketchup::ModelObserver
   # so we will purge them and export them again.
   #
   def onTransactionUndo(model)
-    ImageMagick.caches[model].purge if !ImageMagick.caches[model].nil? # Module.nesting[1]
+    ImageMagick.caches[model].purge if !ImageMagick.caches[model].nil?
   end
-  # Apply images in original file format if lossy formats have been replace by lossless formats
+  # Apply images in original file format if lossy formats have been replace by lossless formats.
   #
   def onPreSaveModel(model)
-    ImageMagick.caches[model].apply if !ImageMagick.caches[model].nil? # Module.nesting[1]
+    ImageMagick.caches[model].apply if !ImageMagick.caches[model].nil?
   end
 end
 
@@ -430,7 +489,7 @@ class QuitObserver < Sketchup::AppObserver
   # Erase all chaches when the application is closed.
   #
   def onQuit()
-    ImageMagick.caches.each{|model, cache| # Module.nesting[1]
+    ImageMagick.caches.each{|model, cache|
       cache.erase if !cache.nil?
     }
   end
@@ -438,7 +497,7 @@ end
 
 
 
-# Clone a material
+# Clone a material.
 # @param [Sketchup::Material] material a Sketchup::Material to clone
 # @param [String] new_name (optional) name for the new material
 # @returns [Sketchup::Material] the newly created material object
@@ -447,13 +506,13 @@ def clone(material, new_name=material.display_name)
   (i = 0; i += 1 while @model.materials[new_name+i.to_s]; new_name = new_name+i.to_s) if @model.materials[new_name]
   new_material = @model.materials.add(new_name)
   new_material.alpha = material.alpha
-  #new_material.color = material.color FIXME: API bug, this sets always "colorized"
+  # new_material.color = material.color # FIXME: API bug, this sets always "colorized".
   if material.materialType > 0
     load(material) if !loaded?(material)
     path = @cache[material][:path]
     @cache[new_material] = {:path => path}
     new_material.texture = path
-    # fix texture size (SketchUp changes it sometimes after replacing the image file!)
+    # Fix the texture size. (SketchUp changes it sometimes after replacing the image file!)
     new_material.texture.size = [material.texture.width, material.texture.height]
   end
   return new_material
@@ -468,65 +527,78 @@ end
 def run_shell_command(cmd, &block)
   cmd = [cmd] if cmd.class != Array
   puts cmd.inspect if @@debug
-  # other
+  # Other
   if WINE
-    # check for native unix ImageMagick installation
-    if @@unix_native == true
-      fsh = File.join(@cache_dir, "temporary.sh")
+    # Check for native unix ImageMagick installation.
+    if @@unix_native
+      fsh = File.join(@cache_dir, "commands.sh")
       File.open(fsh, "w"){|f|
         f.puts %[ #!/bin/sh]
-        cmd.each{|c| f.print(c+";") }
-        f.puts %[touch "`wine winepath.exe -u '#{@cache_dir}'`/finished.txt";]
+        f.puts %[dir="#{@cache_dir.sub(/^Z\:/,"")}";]
+        cmd.each{|c| f.puts(c + %[ >> "$dir/tmp.txt";]) }
+        f.puts %[mv $dir/tmp.txt "$dir/result.txt";]
+        f.puts %[exit 0]
       }
-      begin
-        system(%[Z:\\bin\\bash -c "bash `wine winepath.exe -u "#{fsh}"`"])
-      rescue
-      end
-    # otherwise use Windows ImageMagick as distributed with this plugin
+      return unless @active
+      # Make the script executable.
+      system(%[Z:\\bin\\chmod a+x "#{fsh.sub(/Z\:/,"")}"]) rescue nil
+      # Run it.
+      system(%[Z:\\bin\\sh "#{fsh.sub(/Z\:/,"")}"]) rescue nil
+    # Otherwise use Windows version of ImageMagick as distributed with this plugin.
     #   no WScript necessary because Wine does not show black console window
     else
-      # create a batch script with the commands
-      fbat = File.join(@cache_dir, "temporary.bat")
+      # Create a batch script with the commands.
+      fbat = File.join(@cache_dir, "commands.bat")
       File.open(fbat, "w"){|f|
         f.puts "@echo off"
         cmd.each{|c| f.puts(c) }
-        f.puts %[echo "finished" > "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}\\finished.txt"]
+        f.puts %[echo "finished" > "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}\\result.txt"]
       }
+      return unless @active
       system(%[#{fbat}])
     end
   # Windows
   elsif WIN
-    # create a batch script with the commands
-    fbat = File.join(@cache_dir, "temporary.bat")
+    # Create a batch script with the commands.
+    fbat = File.join(@cache_dir, "commands.bat")
     File.open(fbat, "w"){|f|
       f.puts "@echo off"
       cmd.each{|c| f.puts(c) }
-      f.puts %[echo "finished" > "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}\\finished.txt"]
+      f.puts %[echo "finished" > "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}\\result.txt"]
     }
-    # create a Visual Basic file to launch the batch script without black console window
-    fvbs = File.join(@cache_dir, "temporary.vbs")
+    # Create a Visual Basic file to launch the batch script without black console window.
+    fvbs = File.join(@cache_dir, "commands.vbs")
     File.open(fvbs, "w"){|f|
       f.puts %[Set WshShell = CreateObject("WScript.Shell")]
       f.puts %[WshShell.Run """#{fbat}""", 0]
-      # a third argument bWaitOnReturn=true would wait for the script to finish (synchronously),
+      # A third argument bWaitOnReturn=true would wait for the script to finish (synchronously),
       # but uses SketchUp's process and is 20 times slower.
       # f.puts %[WshShell.Run """#{fbat}""", 0, true]
       f.puts %[WScript.Quit]
     }
+    return unless @active
     system(%[wscript #{fvbs}])
   # OS X
   elsif OSX
-    fsh = File.join(@cache_dir, "temporary.sh")
+    fsh = File.join(@cache_dir, "commands.sh")
     File.open(fsh, "w"){|f|
       f.puts %[ #!/bin/sh]
       cmd.each{|c| f.print(c+";") }
-      f.puts %[touch "#{@cache_dir}/finished.txt";]
+      f.puts %[touch "#{@cache_dir}/result.txt";]
     }
-    system(%[bash #{fsh}])
+    return unless @active
+    system(%[sh #{fsh}])
   end
-  # since the batch script runs asynchronously, we need to know when it is finished
-  # the batch script creates a "finished.txt" file, and we continue only when it is created
-  file_observer(File.join(@cache_dir, "finished.txt"), &block)
+  time_started = Time.now
+  # Since the batch script runs asynchronously, we need to know when it is finished.
+  # The batch script creates a "result.txt" file, and we continue only when it is created.
+  file_observer(File.join(@cache_dir, "result.txt")){
+    puts("#{(Time.now-time_started).to_f}s") if @@debug
+    File.open(File.join(@cache_dir, "result.txt")){|file|
+      result = file.read
+      block.call(result)
+    }
+  }
 end # def run_shell_command
 
 
@@ -536,11 +608,23 @@ end # def run_shell_command
 # @param [Proc] block code block to execute when file is created
 #
 def file_observer(file, &block)
+  puts("File.exists?('#{file}') # #{File.exists?(file)}") if @@debug
   if !File.exists?(file) && @active
-    UI.start_timer(0.2){ file_observer(file, &block) }
+    if @@async
+      t = UI.start_timer(0.2){#, false){
+        #UI.stop_timer(t) rescue nil # Make sure that the timer does not run away.
+        file_observer(file, &block)
+      }
+    else
+      # This change makes everything synchronous.
+      sleep(0.2)
+      file_observer(file, &block)
+    end
+    false
   else
+    block.call if block_given?
     File.delete(file) rescue nil unless @@debug
-    block.call
+    true
   end
 end # def file_observer
 
