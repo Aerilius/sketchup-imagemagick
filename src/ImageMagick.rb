@@ -63,7 +63,7 @@ WIN = ( ( Object::RUBY_PLATFORM =~ /mswin/i || Object::RUBY_PLATFORM =~ /mingw/i
 @@install_location ||= ""
 # Get a temporary folder that is writable.
 temp = [ENV['TMPDIR'], ENV['TMP'], ENV['TEMP'], ENV['USERPROFILE'], '/tmp', '.'].inject(nil){ |t,dir| (!t && dir && File.directory?(dir) && File.writable?(dir))? dir : t }
-@@temp = File.join( File.expand_path(temp), "skp_"+Module.nesting[1].name[/[^\:]+$/].downcase)
+@@temp = File.join( File.expand_path(temp) )
 @@debug = false unless defined?(@@debug)
 @@async = true unless defined?(@@async)
 
@@ -267,7 +267,9 @@ end
 
 # Generate a unique file path for a new cache directory.
 def get_cache_dir
-  @@temp + Time.now.to_i.to_s[/.{5}$/]
+  path = File.join(@@temp, Module.nesting[1].name[/[^\:]+$/].downcase)
+  Dir.mkdir(path) unless File.exists?(path)
+  return File.join(path, Time.now.to_i.to_s[/.{5}$/])
 end # def get_cache_dir
 private :get_cache_dir
 
