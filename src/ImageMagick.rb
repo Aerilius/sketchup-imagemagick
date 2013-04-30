@@ -58,12 +58,11 @@ OSX = ( Object::RUBY_PLATFORM =~ /(darwin)/i ) unless defined?(self::OSX)
 WINE = ( File.exists?("C:/Windows/system32/winepath.exe" || File.exists?("Z:/usr/bin/wine")) && !OSX) unless defined?(self::WINE)
 WIN = ( ( Object::RUBY_PLATFORM =~ /mswin/i || Object::RUBY_PLATFORM =~ /mingw/i ) && !WINE ) unless defined?(self::WIN)
 # Whether to use native unix ImageMagick or ImageMagick through Wine.
-@@wine_unix_native = WINE && File.exists?("Z:/bin/sh") && File.exists?("Z:/usr/bin/convert")
+@@wine_unix_native = nil
 # Install location of ImageMagick.
-@@install_location = $LOAD_PATH.find{|p| f = File.join(p, "ImageMagick", "convert.exe"); break f if File.exists?(f)}
+@@install_location ||= ""
 # Get a temporary folder that is writable.
 temp = [ENV['TMPDIR'], ENV['TMP'], ENV['TEMP'], ENV['USERPROFILE'], '/tmp', '.'].inject(nil){ |t,dir| (!t && dir && File.directory?(dir) && File.writable?(dir))? dir : t }
-temp = "Z:/tmp" if WINE && @@unix_native
 @@temp = File.join( File.expand_path(temp), "skp_"+Module.nesting[1].name[/[^\:]+$/].downcase)
 @@debug = false unless defined?(@@debug)
 @@async = true unless defined?(@@async)
@@ -74,18 +73,61 @@ temp = "Z:/tmp" if WINE && @@unix_native
 # @return [Boolean] whether ImageMagick is installed on Windows/Wine system.
 #
 def self.installed?
-  # Windows version of ImageMagick
-  if WIN || WINE && !@@wine_unix_native
-    @@install_location = Sketchup.read_default("ImageMagick", "location", @@install_location) if !File.exists?(@@install_location)
-    if !File.exists?(@@install_location)
-      UI.messagebox("This Plugin requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert.exe' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
-      path = UI.openpanel("Please select the file path of convert.exe", @@install_location, "convert.exe")
-      return false if !File.exists?(path.to_s)
-      Sketchup.write_default("ImageMagick", "location", path)
+  if WINE && @@wine_unix_native != false
+    if File.exists?("Z:/bin/sh") && File.exists?("Z:/usr/bin/convert")
+      @@wine_unix_native = true
+      @@temp = "Z:/tmp"
+      return true
     end
   end
-  return true
-end # def imagemagick_installed?
+  # Windows version of ImageMagick
+  if WIN || WINE && !@@wine_unix_native
+    possible_paths = [ENV['ProgramFiles']].concat($LOAD_PATH)
+    possible_paths.find{|p|
+      path = Dir.glob(File.join(p, "ImageMagick*", "convert.exe")).first
+      if File.file?(path.to_s)
+        self.install_location = path
+        return true
+      end
+    }
+    @@install_location = Sketchup.read_default("ImageMagick", "location", @@install_location)
+    if !File.exists?(@@install_location)
+      UI.messagebox("Texture Resizer requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert.exe' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
+      path = UI.openpanel("Please select the file path of convert.exe", @@install_location, "convert.exe")
+      if File.file?(path.to_s)
+        return true
+        self.install_location = path
+      end
+    end
+  elsif OSX
+    possible_paths = ["/usr/local/bin/convert"]
+    possible_paths.find{|path|
+      if File.file?(path)
+        self.install_location = path
+        return true
+      end
+    }
+    @@install_location = Sketchup.read_default("ImageMagick", "location", @@install_location)
+    if !File.exists?(@@install_location)
+      UI.messagebox("Texture Resizer requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
+      path = UI.openpanel("Please select the file path of convert", @@install_location, "convert")
+      return false unless File.exists?(path.to_s)
+      self.install_location = path
+    end
+  end
+  return false
+end # def self.installed?
+
+
+
+# Allows to set the path of where ImageMagick is installed.
+# @param [String] path of the "convert" executable
+#
+def self.install_location=(path)
+  raise(ArgumentError, "Path does not exist") unless File.file?(path)
+  Sketchup.write_default("ImageMagick", "location", path)
+  @@install_location = path
+end
 
 
 
