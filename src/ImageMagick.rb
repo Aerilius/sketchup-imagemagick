@@ -450,7 +450,11 @@ def execute(&block)
     block.call(result) if block_given?
   }
   # Batch execute shell commands.
-  run_shell_command(@cmds, &bigblock)
+  if @cmds.empty?
+    bigblock.call(false)
+  else
+    run_shell_command(@cmds, &bigblock)
+  end
   @cmds = []
   @cmd_blocks = []
 end
@@ -584,8 +588,10 @@ private :clone
 # @param [Proc] block code block to execute after the commands have finished
 #
 def run_shell_command(cmd, &block)
-  cmd = [cmd] if cmd.class != Array
-  puts cmd.inspect if @@debug
+  cmds = (cmd.is_a?(Array)) ? cmd : [cmd]
+  puts cmds.inspect if @@debug
+  # Return false if no commands to execute.
+  return block.call(false) if @cmds.empty?
   # Other
   if WINE
     # Check for native unix ImageMagick installation.
@@ -594,7 +600,7 @@ def run_shell_command(cmd, &block)
       File.open(fsh, "w"){|f|
         f.puts %[ #!/bin/sh]
         f.puts %[dir="#{@cache_dir.sub(/^Z\:/,"")}";]
-        cmd.each{|c| f.puts(c + %[ >> "$dir/tmp.txt";]) }
+        cmds.each{|c| f.puts(c + %[ >> "$dir/tmp.txt";]) }
         f.puts %[mv $dir/tmp.txt "$dir/result.txt";]
         f.puts %[exit 0]
       }
@@ -610,7 +616,7 @@ def run_shell_command(cmd, &block)
       fbat = File.join(@cache_dir, "commands.bat")
       File.open(fbat, "w"){|f|
         f.puts "@echo off"
-        cmd.each{|c| f.puts(c) }
+        cmds.each{|c| f.puts(c) }
         f.puts %[echo "finished" > "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}\\result.txt"]
       }
       return unless @active
@@ -622,7 +628,7 @@ def run_shell_command(cmd, &block)
     fbat = File.join(@cache_dir, "commands.bat")
     File.open(fbat, "w"){|f|
       f.puts "@echo off"
-      cmd.each{|c| f.puts(c) }
+      cmds.each{|c| f.puts(c) }
       f.puts %[echo "finished" > "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}\\result.txt"]
     }
     # Create a Visual Basic file to launch the batch script without black console window.
@@ -658,6 +664,10 @@ def run_shell_command(cmd, &block)
       block.call(result)
     }
   }
+rescue
+  # Return false if on error
+  block.call(false) if cmds.empty?
+  raise
 end # def run_shell_command
 private :run_shell_command
 
