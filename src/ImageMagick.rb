@@ -56,11 +56,11 @@ class ImageMagick
 # Platform detection.
 OSX = ( Object::RUBY_PLATFORM =~ /(darwin)/i ) unless defined?(self::OSX)
 WINE = ( File.exists?("C:/Windows/system32/winepath.exe" || File.exists?("Z:/usr/bin/wine")) && !OSX) unless defined?(self::WINE)
-WIN = ( !OSX && !WINE ) unless defined?(self::WIN)
+WIN = ( ( Object::RUBY_PLATFORM =~ /mswin/i || Object::RUBY_PLATFORM =~ /mingw/i ) && !WINE ) unless defined?(self::WIN)
 # Whether to use native unix ImageMagick or ImageMagick through Wine.
-@@unix_native = WINE && File.exists?("Z:/bin/sh") && File.exists?("Z:/usr/bin/convert")
-# Location of ImageMagick on Windows.
-@@im_win = $LOAD_PATH.find{|p| f = File.join(p, "ImageMagick", "convert.exe"); break f if File.exists?(f)}
+@@wine_unix_native = WINE && File.exists?("Z:/bin/sh") && File.exists?("Z:/usr/bin/convert")
+# Install location of ImageMagick.
+@@install_location = $LOAD_PATH.find{|p| f = File.join(p, "ImageMagick", "convert.exe"); break f if File.exists?(f)}
 # Get a temporary folder that is writable.
 temp = [ENV['TMPDIR'], ENV['TMP'], ENV['TEMP'], ENV['USERPROFILE'], '/tmp', '.'].inject(nil){ |t,dir| (!t && dir && File.directory?(dir) && File.writable?(dir))? dir : t }
 temp = "Z:/tmp" if WINE && @@unix_native
@@ -69,16 +69,17 @@ temp = "Z:/tmp" if WINE && @@unix_native
 @@async = true unless defined?(@@async)
 
 
+
 # Check if ImageMagick is installed on a Windows-based system, otherwise offer to select an alternative install location.
 # @return [Boolean] whether ImageMagick is installed on Windows/Wine system.
 #
 def self.installed?
   # Windows version of ImageMagick
-  if WIN || WINE && !@@unix_native
-    @@im_win = Sketchup.read_default("ImageMagick", "location", @@im_win) if !File.exists?(@@im_win)
-    if !File.exists?(@@im_win)
+  if WIN || WINE && !@@wine_unix_native
+    @@install_location = Sketchup.read_default("ImageMagick", "location", @@install_location) if !File.exists?(@@install_location)
+    if !File.exists?(@@install_location)
       UI.messagebox("This Plugin requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert.exe' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
-      path = UI.openpanel("Please select the file path of convert.exe", @@im_win, "convert.exe")
+      path = UI.openpanel("Please select the file path of convert.exe", @@install_location, "convert.exe")
       return false if !File.exists?(path.to_s)
       Sketchup.write_default("ImageMagick", "location", path)
     end
@@ -115,7 +116,7 @@ def self.texture_resolution(face, front=true, c=nil)
   m = (front)? face.material : face.back_material
   w = m.texture.image_width
   h = m.texture.image_height
-  # One model unit (inch) in texture units (pixels)
+  # Texture units (pixels) per model unit (inch)
   return 100 * r * Math.sqrt(w*h)
 end # def texture_resolution
 
@@ -163,7 +164,7 @@ def initialize
   @cmd_blocks = []
   # Have one instance of ImageMagick for each model in a multi-document interface.
   @@caches[@model] = self
-  @active = true  # TODO: Rename this into something like @simulate or @noob ?
+  @active = true
   @model.add_observer(ModelObserver.new)
   @@app_observer = Sketchup.add_observer(QuitObserver.new) if !@@app_observer
 end # def
@@ -178,23 +179,40 @@ end # def
 def self.async
   @@async
 end
+
+
+
 def self.async=(boolean)
   @@async = boolean
 end
+
+
+
 def self.async!
   @@async = true
 end
+
+
 def self.sync
   !@@async
 end
+
+
+
 def self.sync=(boolean)
   @@async = !boolean
   return boolean
 end
+
+
+
 def self.sync!
   @@async = false
   return true
 end
+
+
+
 class << self
   alias_method(:asynchronous, :async)
   alias_method(:asynchronous=, :async=)
@@ -236,7 +254,7 @@ end
 #
 def get_path(material)
   path = @cache[material][:path]
-  if WINE && @@unix_native # TODO: This function is probably not used.
+  if WINE && @@wine_unix_native # TODO: This function is probably not used.
     # Not sure if this should return the Wine=Windows format or Unix format.
     return path[/^Z\:/] ? %["#{path.sub(/Z\:/,"")}"] : %["`wine winepath.exe -u '#{path}'`"]
   elsif WIN || WINE
@@ -347,12 +365,12 @@ end
 # @param [Proc] block  code block to execute after this image has been converted
 #
 def convert(input, convert_option, output=input, queue=false, &block)
-  if WINE && @@unix_native
+  if WINE && @@wine_unix_native
     executable = 'convert'
     input = input[/^Z\:/] ? %["#{input.sub(/Z\:/,"")}"] : %["`wine winepath.exe -u '#{input}'`"]
     output = output[/^Z\:/] ? %["#{output.sub(/Z\:/,"")}"] : %["`wine winepath.exe -u '#{output}'`"]
   elsif WIN || WINE
-    executable = %["#{@@im_win.gsub(/\//,'//').gsub(/\//,'\\')}"]
+    executable = %["#{@@install_location.gsub(/\//,'//').gsub(/\//,'\\')}"]
     input = %["#{input.gsub(/\//,'//').gsub(/\//,'\\')}"]
     output = %["#{output.gsub(/\//,'//').gsub(/\//,'\\')}"]
   elsif OSX
@@ -412,7 +430,7 @@ def reimport(material, path=nil)
   # Fix the texture size. (SketchUp changes it sometimes after replacing the image file!)
   material.texture.size = [rw,rh]
   material.alpha = a
-  # material.color = c # FIXME: API bug, this sets always "colorized".
+  # material.color = c # FIXME: SketchUp Ruby API bug, this sets always "colorized".
 end # def reimport
 
 
@@ -461,10 +479,6 @@ def cancel
   @active = false
   purge
 end
-
-
-
-private
 
 
 
@@ -517,6 +531,7 @@ def clone(material, new_name=material.display_name)
   end
   return new_material
 end
+private :clone
 
 
 
@@ -530,7 +545,7 @@ def run_shell_command(cmd, &block)
   # Other
   if WINE
     # Check for native unix ImageMagick installation.
-    if @@unix_native
+    if @@wine_unix_native
       fsh = File.join(@cache_dir, "commands.sh")
       File.open(fsh, "w"){|f|
         f.puts %[ #!/bin/sh]
@@ -600,6 +615,7 @@ def run_shell_command(cmd, &block)
     }
   }
 end # def run_shell_command
+private :run_shell_command
 
 
 
@@ -627,6 +643,7 @@ def file_observer(file, &block)
     true
   end
 end # def file_observer
+private :file_observer
 
 
 
