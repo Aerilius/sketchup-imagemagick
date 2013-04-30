@@ -600,8 +600,9 @@ def run_shell_command(cmd, &block)
       File.open(fsh, "w"){|f|
         f.puts %[ #!/bin/sh]
         f.puts %[dir="#{@cache_dir.sub(/^Z\:/,"")}";]
+        f.puts %[touch "$dir/tmp.txt";]
         cmds.each{|c| f.puts(c + %[ >> "$dir/tmp.txt";]) }
-        f.puts %[mv $dir/tmp.txt "$dir/result.txt";]
+        f.puts %[mv "$dir/tmp.txt" "$dir/result.txt";]
         f.puts %[exit 0]
       }
       return unless @active
@@ -615,9 +616,11 @@ def run_shell_command(cmd, &block)
       # Create a batch script with the commands.
       fbat = File.join(@cache_dir, "commands.bat")
       File.open(fbat, "w"){|f|
-        f.puts "@echo off"
-        cmds.each{|c| f.puts(c) }
-        f.puts %[echo "finished" > "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}\\result.txt"]
+        f.puts %[@echo off]
+        f.puts %[cd "#{@cache_dir}"]
+        f.puts %[copy nul "tmp.txt"]
+        cmds.each{|c| f.puts(c + %[ > "tmp.txt"]) }
+        f.puts %[copy "tmp.txt" "result.txt"]
       }
       return unless @active
       system(%[#{fbat}])
@@ -627,9 +630,11 @@ def run_shell_command(cmd, &block)
     # Create a batch script with the commands.
     fbat = File.join(@cache_dir, "commands.bat")
     File.open(fbat, "w"){|f|
-      f.puts "@echo off"
-      cmds.each{|c| f.puts(c) }
-      f.puts %[echo "finished" > "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}\\result.txt"]
+      f.puts %[@echo off]
+      f.putsv%[cd "#{@cache_dir}"]
+      f.puts %[copy nul "tmp.txt"]
+      cmds.each{|c| f.puts(c + %[ > "tmp.txt"]) }
+      f.puts %[copy "tmp.txt" "result.txt"]
     }
     # Create a Visual Basic file to launch the batch script without black console window.
     fvbs = File.join(@cache_dir, "commands.vbs")
@@ -648,8 +653,11 @@ def run_shell_command(cmd, &block)
     fsh = File.join(@cache_dir, "commands.sh")
     File.open(fsh, "w"){|f|
       f.puts %[ #!/bin/sh]
-      cmd.each{|c| f.print(c+";") }
-      f.puts %[touch "#{@cache_dir}/result.txt";]
+      f.puts %[dir="#{@cache_dir}";]
+      f.puts %[touch "$dir/tmp.txt";]
+      cmds.each{|c| f.print(c + %[ >> "$dir/tmp.txt";]) }
+      f.puts %[mv "$dir/tmp.txt" "$dir/result.txt";]
+      f.puts %[exit 0]
     }
     return unless @active
     system(%[sh #{fsh}])
