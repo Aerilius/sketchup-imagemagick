@@ -631,7 +631,7 @@ def run_shell_command(cmd, &block)
     fbat = File.join(@cache_dir, "commands.bat")
     File.open(fbat, "w"){|f|
       f.puts %[@echo off]
-      f.putsv%[cd "#{@cache_dir}"]
+      f.puts %[cd "#{@cache_dir}"]
       f.puts %[copy nul "tmp.txt"]
       cmds.each{|c| f.puts(c + %[ > "tmp.txt"]) }
       f.puts %[copy "tmp.txt" "result.txt"]
