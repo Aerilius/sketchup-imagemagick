@@ -42,12 +42,12 @@ Requirements: ImageMagick
                   or install the Windows version of ImageMagick into Wine exactly
                   as described above for Windows.
                 OS X: ImageMagick can be installed with HomeBrew or MacPorts
-Version:      1.4.8
+Version:      1.4.9
 Date:         08.05.2013
 
 =end
-require 'sketchup.rb'
 
+require('sketchup.rb')
 
 
 class ImageMagick
@@ -58,7 +58,7 @@ OSX = ( Object::RUBY_PLATFORM =~ /(darwin)/i ) unless defined?(self::OSX)
 WINE = ( File.exists?("C:/Windows/system32/winepath.exe" || File.exists?("Z:/usr/bin/wine")) && !OSX) unless defined?(self::WINE)
 WIN = ( ( Object::RUBY_PLATFORM =~ /mswin/i || Object::RUBY_PLATFORM =~ /mingw/i ) && !WINE ) unless defined?(self::WIN)
 # Whether to use native unix ImageMagick or ImageMagick through Wine.
-@@wine_unix_native = nil
+@@wine_unix_native ||= nil
 # Install location of ImageMagick.
 @@install_location ||= ""
 # Get a temporary folder that is writable.
@@ -202,17 +202,19 @@ end
 
 # Initialize, create a temporary cache folder that is unique for each model.
 #
-def initialize
-  @model = Sketchup.active_model
-  @tw = Sketchup.create_texture_writer
+def initialize(model=nil)
+  @model = (model.is_a?(Sketchup::Model)) ? model : Sketchup.active_model
+  # Check if ImageMagick is installed:
+  self.class.installed?
   @cache_dir = get_cache_dir
   Dir.mkdir(@cache_dir) unless File.exists?(@cache_dir)
   @cache = {}
   @cmds = []
   @cmd_blocks = []
-  # Have one instance of ImageMagick for each model in a multi-document interface.
+  # Have one instance of this ImageMagick class for each model in a multi-document interface.
   @@caches[@model] = self
-  @active = true
+  @active = true # Whether to run ImageMagick or just simulate.
+  @tw = Sketchup.create_texture_writer
   @model.add_observer(ModelObserver.new)
   @@app_observer = Sketchup.add_observer(QuitObserver.new) if !@@app_observer
 end # def
@@ -597,7 +599,7 @@ def run_shell_command(cmd, &block)
   cmds = (cmd.is_a?(Array)) ? cmd : [cmd]
   puts cmds.inspect if @@debug
   # Return false if no commands to execute.
-  return block.call(false) if @cmds.empty?
+  return block.call(false) if cmds.empty?
   # Other
   if WINE
     # Check for native unix ImageMagick installation.
@@ -611,7 +613,7 @@ def run_shell_command(cmd, &block)
         f.puts %[mv "$dir/tmp.txt" "$dir/result.txt";]
         f.puts %[exit 0]
       }
-      return unless @active
+      return block.call(false) unless @active
       # Make the script executable.
       system(%[Z:\\bin\\chmod a+x "#{fsh.sub(/Z\:/,"")}"]) rescue nil
       # Run it.
@@ -628,7 +630,7 @@ def run_shell_command(cmd, &block)
         cmds.each{|c| f.puts(c + %[ > "tmp.txt"]) }
         f.puts %[rename "tmp.txt" "result.txt"]
       }
-      return unless @active
+      return block.call(false) unless @active
       system(%[#{fbat}])
     end
   # Windows
@@ -652,7 +654,7 @@ def run_shell_command(cmd, &block)
       # f.puts %[WshShell.Run """#{fbat}""", 0, true]
       f.puts %[WScript.Quit]
     }
-    return unless @active
+    return block.call(false) unless @active
     system(%[wscript #{fvbs}])
   # OS X
   elsif OSX
@@ -665,7 +667,7 @@ def run_shell_command(cmd, &block)
       f.puts %[mv "$dir/tmp.txt" "$dir/result.txt";]
       f.puts %[exit 0]
     }
-    return unless @active
+    return block.call(false) unless @active
     system(%[sh #{fsh}])
   end
   time_started = Time.now
@@ -678,6 +680,7 @@ def run_shell_command(cmd, &block)
       block.call(result)
     }
   }
+  return true
 rescue
   # Return false if on error
   block.call(false) if cmds.empty?
