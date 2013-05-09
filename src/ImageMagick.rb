@@ -42,8 +42,8 @@ Requirements: ImageMagick
                   or install the Windows version of ImageMagick into Wine exactly
                   as described above for Windows.
                 OS X: ImageMagick can be installed with HomeBrew or MacPorts
-Version:      1.4.
-Date:         16.04.2013
+Version:      1.4.8
+Date:         08.05.2013
 
 =end
 require 'sketchup.rb'
@@ -83,7 +83,7 @@ def self.installed?
   # Windows version of ImageMagick
   if WIN || WINE && !@@wine_unix_native
     possible_paths = [ENV['ProgramFiles']].concat($LOAD_PATH)
-    possible_paths.find{|p|
+    possible_paths.find{ |p|
       path = Dir.glob(File.join(p, "ImageMagick*", "convert.exe")).first
       if File.file?(path.to_s)
         self.install_location = path
@@ -91,12 +91,14 @@ def self.installed?
       end
     }
     @@install_location = Sketchup.read_default("ImageMagick", "location", @@install_location)
-    if !File.exists?(@@install_location)
-      UI.messagebox("Texture Resizer requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert.exe' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
+    if File.exists?(@@install_location)
+      return true
+    else
+      UI.messagebox("Texture Resizer requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert.exe' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.", MB_OK)
       path = UI.openpanel("Please select the file path of convert.exe", @@install_location, "convert.exe")
       if File.file?(path.to_s)
-        return true
         self.install_location = path
+        return true
       end
     end
   elsif OSX
@@ -108,11 +110,15 @@ def self.installed?
       end
     }
     @@install_location = Sketchup.read_default("ImageMagick", "location", @@install_location)
-    if !File.exists?(@@install_location)
-      UI.messagebox("Texture Resizer requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.",MB_OK)
+    if File.exists?(@@install_location)
+      return true
+    else
+      UI.messagebox("Texture Resizer requires ImageMagick, but it could not be found. \nPlease navigate to the ImageMagick folder and select the file 'convert' or install ImageMagick from \nhttp://www.imagemagick.org/script/binary-releases.php.", MB_OK)
       path = UI.openpanel("Please select the file path of convert", @@install_location, "convert")
-      return false unless File.exists?(path.to_s)
-      self.install_location = path
+      if File.file?(path.to_s)
+        self.install_location = path
+        return true
+      end
     end
   end
   return false
@@ -124,8 +130,8 @@ end # def self.installed?
 # @param [String] path of the "convert" executable
 #
 def self.install_location=(path)
-  raise(ArgumentError, "Path does not exist") unless File.file?(path)
-  Sketchup.write_default("ImageMagick", "location", path)
+  raise(ArgumentError, "ImageMagick.rb: Path does not exist") unless File.file?(path)
+  Sketchup.write_default("ImageMagick", "location", path.inspect[1...-1])
   @@install_location = path
 end
 
@@ -315,20 +321,20 @@ end
 # @param[Boolean] lossless  whether to export a copy of jpeg/jpg images in bmp format
 # @return [String] the file path in the system's format (not ruby format)
 #
-def load(material, lossless=false)
-  return (puts(material.name+": is untextured"); nil) if material.materialType < 1 # refuse untextured materials
+def load(material, lossless=true)
+  return (puts("ImageMagick.rb: #{material.name}: is untextured"); nil) if material.materialType < 1 # refuse untextured materials
   return get_path(material) if loaded?(material)
   filename = File.basename(material.texture.filename)
   # Force extension if filename has no extension.
-  ext = (File.extname(filename).empty?)? ".png" : nil
+  ext = (File.extname(filename).empty?) ? ".png" : nil
   path = to_filename(@cache_dir, filename, ext)
   Dir.mkdir(@cache_dir) if !File.exists?(@cache_dir)
   # Create temporary group to export texture image without UV-mapping.
   tmp_group = @model.entities.add_group
   tmp_group.material = material
-  @tw.load(tmp_group) rescue (puts(material.name+": could not load material into TextureWriter"); return nil)
+  @tw.load(tmp_group) rescue (puts("ImageMagick.rb: #{material.name}: could not load material into TextureWriter"); return nil)
   success = @tw.write(tmp_group, path, true)
-  return (puts(material.name+": could not write file "+path); nil) if success!=0
+  return (puts("ImageMagick.rb: #{material.name}: could not write file #{path}"); nil) if success!=0
   @cache[material] = {:path => path}
   # Export a lossless copy for lossy formats (to preserve quality and for speed).
   if lossless && (filename[/\.jpg$/] || filename[/\.jpeg$/i])
@@ -339,7 +345,7 @@ def load(material, lossless=false)
       @cache[material][:path] = path
       @cache[material][:orig] = orig
     else
-      puts(material.name+": could not write file "+path)
+      puts("ImageMagick.rb: #{material.name}: could not write file #{path}")
     end
   end
   @model.entities.erase_entities(tmp_group)
@@ -468,7 +474,7 @@ end
 #
 def reimport(material, path=nil)
   path = @cache[material][:path] if path.nil? && loaded?(material)
-  return (puts("file "+path+" not found")) if path.nil? || !File.exists?(path)
+  return (puts("ImageMagick.rb: could not find #{path} for importing")) if path.nil? || !File.exists?(path)
   rw = material.texture.width # real-world width
   rh = material.texture.height # real-world height
   a = material.alpha
@@ -620,7 +626,7 @@ def run_shell_command(cmd, &block)
         f.puts %[cd "#{@cache_dir}"]
         f.puts %[copy nul "tmp.txt"]
         cmds.each{|c| f.puts(c + %[ > "tmp.txt"]) }
-        f.puts %[copy "tmp.txt" "result.txt"]
+        f.puts %[rename "tmp.txt" "result.txt"]
       }
       return unless @active
       system(%[#{fbat}])
@@ -631,10 +637,10 @@ def run_shell_command(cmd, &block)
     fbat = File.join(@cache_dir, "commands.bat")
     File.open(fbat, "w"){|f|
       f.puts %[@echo off]
-      f.puts %[cd "#{@cache_dir}"]
+      f.puts %[cd "#{@cache_dir.gsub(/\//,'//').gsub(/\//,'\\')}"]
       f.puts %[copy nul "tmp.txt"]
       cmds.each{|c| f.puts(c + %[ > "tmp.txt"]) }
-      f.puts %[copy "tmp.txt" "result.txt"]
+      f.puts %[rename "tmp.txt" "result.txt"]
     }
     # Create a Visual Basic file to launch the batch script without black console window.
     fvbs = File.join(@cache_dir, "commands.vbs")
@@ -686,7 +692,7 @@ private :run_shell_command
 # @param [Proc] block code block to execute when file is created
 #
 def file_observer(file, &block)
-  puts("File.exists?('#{file}') # #{File.exists?(file)}") if @@debug
+  puts("ImageMagick.rb: File.exists?('#{file}') # #{File.exists?(file)}") if @@debug
   if !File.exists?(file) && @active
     if @@async
       t = UI.start_timer(0.2){#, false){
