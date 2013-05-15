@@ -41,7 +41,7 @@ Requirements: ImageMagick
                   Wine has the "/" directory linked to a Windows "Z:" drive.)
                   or install the Windows version of ImageMagick into Wine exactly
                   as described above for Windows.
-                OS X: ImageMagick can be installed with HomeBrew or MacPorts
+                OS X: ImageMagick can be installed with HomeBrew or MacPorts.
 Version:      1.4.9
 Date:         08.05.2013
 
@@ -324,7 +324,7 @@ end
 # @return [String] the file path in the system's format (not ruby format)
 #
 def load(material, lossless=true)
-  return (puts("ImageMagick.rb: #{material.name}: is untextured"); nil) if material.materialType < 1 # refuse untextured materials
+  return (puts("ImageMagick.rb: #{material.name}: is untextured"); nil) unless material.materialType >= 1 && material.texture.is_a?(Sketchup::Texture) # refuse untextured materials
   return get_path(material) if loaded?(material)
   filename = File.basename(material.texture.filename)
   # Force extension if filename has no extension.
